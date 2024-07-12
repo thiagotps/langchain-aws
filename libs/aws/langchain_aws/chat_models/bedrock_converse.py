@@ -42,7 +42,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils import get_from_dict_or_env
 from langchain_core.utils.function_calling import convert_to_openai_function
 
-from langchain_aws.function_calling import ToolsOutputParser
+from langchain_aws.function_calling import ToolsOutputParser, convert_to_anthropic_tool
 
 
 @beta()
@@ -436,7 +436,9 @@ class ChatBedrockConverse(BaseChatModel):
     ) -> Runnable[LanguageModelInput, BaseMessage]:
         if tool_choice:
             kwargs["tool_choice"] = _format_tool_choice(tool_choice)
-        return self.bind(tools=_format_tools(tools), **kwargs)
+
+        formatted_tools = [convert_to_anthropic_tool(tool) for tool in tools]
+        return self.bind(tools=formatted_tools, **kwargs)
 
     def with_structured_output(
         self,
@@ -759,6 +761,14 @@ def _format_tools(
     for tool in tools:
         if isinstance(tool, dict) and "toolSpec" in tool:
             formatted_tools.append(tool)
+        # Note: AnthropicTool actually has an input_schema, but since the dict was passed  to
+        # _snake_to_camel_keys, it will become inputSchema
+        elif isinstance(tool, dict) and all(
+            (key in tool for key in ["name", "description", "inputSchema"])
+        ):
+            formatted_tools.append(
+                {"toolSpec": {**tool, "inputSchema": {"json": tool["inputSchema"]}}}
+            )
         else:
             spec = convert_to_openai_function(tool)
             spec["inputSchema"] = {"json": spec.pop("parameters")}
